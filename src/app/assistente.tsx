@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { useCallback, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -16,9 +16,30 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 
+/* =========================================================
+   STORAGE
+========================================================= */
+
 const PROFILE_KEY = "corrida-ai.perfil.v1";
 const INTERVIEW_KEY = "corrida-ai.entrevista.v1";
 const WORKOUT_KEY = "corrida-ai.treino.v1";
+
+/*
+ * URL do teu backend.
+
+ * Exemplo no .env:
+ *
+ * EXPO_PUBLIC_API_URL=http://192.168.1.100:3000
+ *
+ * IMPORTANTE:
+ * Não colocar OPENAI_API_KEY aqui.
+ * A chave da OpenAI fica apenas no backend.
+ */
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim() || "";
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 type Profile = {
   name: string;
@@ -37,6 +58,34 @@ type Interview = {
   hasRace: string;
   raceDate: string;
   feeling: string;
+
+  /*
+   * Relato livre.
+   *
+   * Aqui o utilizador poderá escrever futuramente
+   * aquilo que falou com o assistente por voz.
+   */
+  todayReport: string;
+};
+
+type WorkoutStep = {
+  name: string;
+  duration: string;
+  instructions: string;
+
+  /*
+   * Identificador que será utilizado futuramente
+   * para escolher a animação do avatar 3D.
+   *
+   * Exemplos:
+   * ankle_circles
+   * hip_mobility
+   * leg_swings
+   * squat_to_stand
+   * easy_walk
+   * easy_run
+   */
+  avatarExercise: string;
 };
 
 type Workout = {
@@ -44,10 +93,24 @@ type Workout = {
   objective: string;
   duration: string;
   intensity: string;
-  warmup: string[];
-  workout: string[];
-  cooldown: string[];
+
+  warmup: WorkoutStep[];
+
+  mobility: WorkoutStep[];
+
+  workout: WorkoutStep[];
+
+  cooldown: WorkoutStep[];
+
   note: string;
+
+  safetyNote?: string;
+
+  /*
+   * Identifica se o treino veio da IA ou do
+   * motor local de segurança/fallback.
+   */
+  source?: "ai" | "local";
 };
 
 type Question = {
@@ -59,6 +122,10 @@ type Question = {
   placeholder?: string;
 };
 
+/* =========================================================
+   EMPTY INTERVIEW
+========================================================= */
+
 const EMPTY_INTERVIEW: Interview = {
   maxDistance: "",
   runningTime: "",
@@ -66,7 +133,12 @@ const EMPTY_INTERVIEW: Interview = {
   hasRace: "",
   raceDate: "",
   feeling: "",
+  todayReport: "",
 };
+
+/* =========================================================
+   QUESTIONS
+========================================================= */
 
 const questions: Question[] = [
   {
@@ -77,6 +149,7 @@ const questions: Question[] = [
     type: "text",
     placeholder: "Ex.: 3 km",
   },
+
   {
     key: "runningTime",
     title: "Quanto tempo consegues correr sem parar?",
@@ -85,6 +158,7 @@ const questions: Question[] = [
     type: "text",
     placeholder: "Ex.: 20 minutos",
   },
+
   {
     key: "lastRun",
     title: "Quando foi a tua última corrida?",
@@ -92,14 +166,16 @@ const questions: Question[] = [
     type: "text",
     placeholder: "Ex.: há 3 dias",
   },
+
   {
     key: "hasRace",
     title: "Tens alguma prova ou data específica como objetivo?",
     description:
-      "Se tiveres uma data em mente, podemos considerar isso no futuro plano.",
+      "Se tiveres uma data em mente, podemos considerar isso no plano.",
     type: "choice",
     options: ["Sim", "Não"],
   },
+
   {
     key: "raceDate",
     title: "Qual é a data ou prova que tens em mente?",
@@ -107,14 +183,208 @@ const questions: Question[] = [
     type: "text",
     placeholder: "Ex.: Corrida de 5 km em novembro",
   },
+
   {
     key: "feeling",
     title: "Como te sentes hoje?",
-    description: "Isto vai ajudar o assistente a adaptar o treino do dia.",
+    description: "Isto ajuda o assistente a adaptar o treino do dia.",
     type: "choice",
     options: ["Com energia", "Normal", "Cansada"],
   },
+
+  {
+    key: "todayReport",
+    title: "Há alguma coisa que eu deva saber antes de preparar o treino?",
+    description:
+      "Conta livremente como estás hoje. Podes falar de energia, sono, pernas pesadas, dificuldade, desconforto ou qualquer outra coisa que consideres importante.",
+    type: "text",
+    placeholder:
+      "Ex.: Dormi mal e estou com as pernas pesadas. Sinto-me sem muita energia hoje...",
+  },
 ];
+
+/* =========================================================
+   AVATAR EXERCISE IDS
+========================================================= */
+
+/*
+ * Estes IDs serão utilizados posteriormente
+ * pelo componente do avatar 3D.
+ *
+ * A IA deverá escolher apenas IDs existentes
+ * no catálogo do backend.
+ */
+
+const AVATAR_EXERCISES = {
+  ankleCircles: "ankle_circles",
+  hipMobility: "hip_mobility",
+  legSwings: "leg_swings",
+  squatToStand: "squat_to_stand",
+  walkingLunge: "walking_lunge",
+  calfRaise: "calf_raise",
+  gluteBridge: "glute_bridge",
+  easyWalk: "easy_walk",
+  easyRun: "easy_run",
+  runWalkIntervals: "run_walk_intervals",
+  highKnees: "high_knees",
+  buttKicks: "butt_kicks",
+  breathing: "breathing",
+  calfStretch: "calf_stretch",
+  quadStretch: "quad_stretch",
+  hipStretch: "hip_stretch",
+} as const;
+
+/* =========================================================
+   DEFAULT EXERCISES
+========================================================= */
+
+function defaultStep(
+  name: string,
+  duration: string,
+  instructions: string,
+  avatarExercise: string,
+): WorkoutStep {
+  return {
+    name,
+    duration,
+    instructions,
+    avatarExercise,
+  };
+}
+
+/* =========================================================
+   NORMALIZE OLD WORKOUT
+========================================================= */
+
+/*
+ * O app já possui treinos antigos guardados no SecureStore.
+ *
+ * Os treinos antigos têm:
+ *
+ * warmup: string[]
+ * workout: string[]
+ * cooldown: string[]
+ *
+ * A nova versão usa:
+ *
+ * WorkoutStep[]
+ *
+ * Esta função permite que o aplicativo continue
+ * funcionando mesmo que exista um treino antigo salvo.
+ */
+
+function normalizeWorkoutStep(
+  item: unknown,
+  fallbackAvatar: string,
+): WorkoutStep {
+  if (typeof item === "string") {
+    return {
+      name: item,
+      duration: "",
+      instructions: item,
+      avatarExercise: fallbackAvatar,
+    };
+  }
+
+  if (item && typeof item === "object") {
+    const value = item as Partial<WorkoutStep>;
+
+    return {
+      name: typeof value.name === "string" ? value.name : "Exercício",
+
+      duration: typeof value.duration === "string" ? value.duration : "",
+
+      instructions:
+        typeof value.instructions === "string"
+          ? value.instructions
+          : typeof value.name === "string"
+            ? value.name
+            : "",
+
+      avatarExercise:
+        typeof value.avatarExercise === "string"
+          ? value.avatarExercise
+          : fallbackAvatar,
+    };
+  }
+
+  return {
+    name: "Exercício",
+    duration: "",
+    instructions: "",
+    avatarExercise: fallbackAvatar,
+  };
+}
+
+function normalizeWorkout(value: unknown): Workout {
+  const workout = value as Partial<Workout>;
+
+  const warmup = Array.isArray(workout?.warmup)
+    ? workout.warmup.map((item) =>
+        normalizeWorkoutStep(item, AVATAR_EXERCISES.easyWalk),
+      )
+    : [];
+
+  const mobility = Array.isArray(workout?.mobility)
+    ? workout.mobility.map((item) =>
+        normalizeWorkoutStep(item, AVATAR_EXERCISES.hipMobility),
+      )
+    : [];
+
+  const mainWorkout = Array.isArray(workout?.workout)
+    ? workout.workout.map((item) =>
+        normalizeWorkoutStep(item, AVATAR_EXERCISES.easyRun),
+      )
+    : [];
+
+  const cooldown = Array.isArray(workout?.cooldown)
+    ? workout.cooldown.map((item) =>
+        normalizeWorkoutStep(item, AVATAR_EXERCISES.breathing),
+      )
+    : [];
+
+  return {
+    title:
+      typeof workout?.title === "string"
+        ? workout.title
+        : "Treino personalizado",
+
+    objective:
+      typeof workout?.objective === "string"
+        ? workout.objective
+        : "Desenvolver resistência de forma progressiva.",
+
+    duration:
+      typeof workout?.duration === "string" ? workout.duration : "30 minutos",
+
+    intensity:
+      typeof workout?.intensity === "string"
+        ? workout.intensity
+        : "Leve a moderada",
+
+    warmup,
+
+    mobility,
+
+    workout: mainWorkout,
+
+    cooldown,
+
+    note:
+      typeof workout?.note === "string"
+        ? workout.note
+        : "Mantém um ritmo confortável.",
+
+    safetyNote:
+      typeof workout?.safetyNote === "string" ? workout.safetyNote : undefined,
+
+    source: workout?.source === "ai" ? "ai" : "local",
+  };
+}
+
+/* =========================================================
+   MAIN SCREEN
+========================================================= */
 
 export default function AssistenteScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -122,22 +392,25 @@ export default function AssistenteScreen() {
   const [interview, setInterview] = useState<Interview>(EMPTY_INTERVIEW);
 
   const [loading, setLoading] = useState(true);
+
   const [started, setStarted] = useState(false);
+
   const [completed, setCompleted] = useState(false);
+
   const [workoutCreated, setWorkoutCreated] = useState(false);
 
   const [currentQuestion, setCurrentQuestion] = useState(0);
+
   const [saving, setSaving] = useState(false);
 
   const [workout, setWorkout] = useState<Workout | null>(null);
 
-  /*
-   * CARREGAR APENAS O PERFIL E O TREINO
-   *
-   * A entrevista NÃO é carregada aqui.
-   * Isso permite começar uma nova entrevista
-   * sempre que entramos no Assistente.
-   */
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  /* =========================================================
+     LOAD DATA
+  ========================================================= */
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -153,11 +426,21 @@ export default function AssistenteScreen() {
           if (!active) return;
 
           if (savedProfile) {
-            setProfile(JSON.parse(savedProfile));
+            try {
+              setProfile(JSON.parse(savedProfile));
+            } catch (error) {
+              console.log("Erro ao interpretar perfil:", error);
+            }
           }
 
           if (savedWorkout) {
-            setWorkout(JSON.parse(savedWorkout));
+            try {
+              const parsedWorkout = JSON.parse(savedWorkout);
+
+              setWorkout(normalizeWorkout(parsedWorkout));
+            } catch (error) {
+              console.log("Erro ao interpretar treino:", error);
+            }
           }
         } catch (error) {
           console.log("Erro ao carregar dados:", error);
@@ -176,9 +459,10 @@ export default function AssistenteScreen() {
     }, []),
   );
 
-  /*
-   * GUARDAR ENTREVISTA
-   */
+  /* =========================================================
+     SAVE INTERVIEW
+  ========================================================= */
+
   async function saveInterview(data: Interview) {
     try {
       await SecureStore.setItemAsync(INTERVIEW_KEY, JSON.stringify(data));
@@ -187,9 +471,10 @@ export default function AssistenteScreen() {
     }
   }
 
-  /*
-   * GUARDAR TREINO
-   */
+  /* =========================================================
+     SAVE WORKOUT
+  ========================================================= */
+
   async function saveWorkout(data: Workout) {
     try {
       await SecureStore.setItemAsync(WORKOUT_KEY, JSON.stringify(data));
@@ -198,9 +483,10 @@ export default function AssistenteScreen() {
     }
   }
 
-  /*
-   * ATUALIZAR RESPOSTA
-   */
+  /* =========================================================
+     UPDATE ANSWER
+  ========================================================= */
+
   function updateAnswer(key: keyof Interview, value: string) {
     const updatedInterview = {
       ...interview,
@@ -212,9 +498,10 @@ export default function AssistenteScreen() {
     void saveInterview(updatedInterview);
   }
 
-  /*
-   * VERIFICAR SE A PERGUNTA FOI RESPONDIDA
-   */
+  /* =========================================================
+     QUESTION VALIDATION
+  ========================================================= */
+
   function isCurrentQuestionAnswered() {
     const question = questions[currentQuestion];
 
@@ -227,9 +514,10 @@ export default function AssistenteScreen() {
     return String(interview[question.key]).trim().length > 0;
   }
 
-  /*
-   * PRÓXIMA PERGUNTA
-   */
+  /* =========================================================
+     NEXT QUESTION
+  ========================================================= */
+
   function nextQuestion() {
     if (!isCurrentQuestionAnswered()) {
       return;
@@ -237,13 +525,15 @@ export default function AssistenteScreen() {
 
     /*
      * Se não tem prova,
-     * pula a pergunta da data/prova.
+     * pula a pergunta da data.
      */
+
     if (
       questions[currentQuestion].key === "hasRace" &&
       interview.hasRace === "Não"
     ) {
       setCurrentQuestion(currentQuestion + 2);
+
       return;
     }
 
@@ -252,9 +542,10 @@ export default function AssistenteScreen() {
     }
   }
 
-  /*
-   * PERGUNTA ANTERIOR
-   */
+  /* =========================================================
+     PREVIOUS QUESTION
+  ========================================================= */
+
   function previousQuestion() {
     if (currentQuestion === 0) {
       setStarted(false);
@@ -262,27 +553,26 @@ export default function AssistenteScreen() {
     }
 
     /*
-     * Se a pessoa respondeu "Não" à prova,
-     * volta diretamente para essa pergunta.
+     * Se respondeu "Não" à prova,
+     * volta diretamente para hasRace.
      */
+
     if (
       questions[currentQuestion].key === "feeling" &&
       interview.hasRace === "Não"
     ) {
       setCurrentQuestion(currentQuestion - 2);
+
       return;
     }
 
     setCurrentQuestion(currentQuestion - 1);
   }
 
-  /*
-   * COMEÇAR NOVA ENTREVISTA
-   *
-   * IMPORTANTE:
-   * Aqui limpamos completamente
-   * as respostas anteriores.
-   */
+  /* =========================================================
+     START INTERVIEW
+  ========================================================= */
+
   function startInterview() {
     setInterview({
       ...EMPTY_INTERVIEW,
@@ -292,12 +582,14 @@ export default function AssistenteScreen() {
     setCompleted(false);
     setWorkoutCreated(false);
     setWorkout(null);
+    setAiError(null);
     setCurrentQuestion(0);
   }
 
-  /*
-   * CONCLUIR ENTREVISTA
-   */
+  /* =========================================================
+     FINISH INTERVIEW
+  ========================================================= */
+
   async function finishInterview() {
     try {
       setSaving(true);
@@ -312,9 +604,10 @@ export default function AssistenteScreen() {
     }
   }
 
-  /*
-   * MOTOR DO PRIMEIRO TREINO
-   */
+  /* =========================================================
+     LOCAL FALLBACK WORKOUT
+  ========================================================= */
+
   function createFirstWorkout(): Workout {
     const goal = profile?.goal?.toLowerCase() || "";
 
@@ -326,9 +619,6 @@ export default function AssistenteScreen() {
 
     const runningTimeText = interview.runningTime.toLowerCase();
 
-    /*
-     * Extrair primeiro número
-     */
     const distanceMatch = maxDistanceText.match(/(\d+(?:[.,]\d+)?)/);
 
     const timeMatch = runningTimeText.match(/(\d+(?:[.,]\d+)?)/);
@@ -341,9 +631,10 @@ export default function AssistenteScreen() {
 
     const feeling = interview.feeling;
 
-    /*
-     * 1. INTENSIDADE
-     */
+    /* =====================================================
+       INTENSITY
+    ===================================================== */
+
     let intensity = "Leve a moderada";
 
     if (feeling === "Cansada") {
@@ -354,18 +645,20 @@ export default function AssistenteScreen() {
       intensity = "Moderada";
     }
 
-    /*
-     * 2. DURAÇÃO
-     */
+    /* =====================================================
+       DURATION
+    ===================================================== */
+
     let workoutDuration = profile?.duration || "30 minutos";
 
     if (feeling === "Cansada") {
       workoutDuration = "25 minutos";
     }
 
-    /*
-     * 3. OBJETIVO
-     */
+    /* =====================================================
+       OBJECTIVE
+    ===================================================== */
+
     let objective = "Construir resistência e criar consistência na corrida.";
 
     if (
@@ -383,95 +676,315 @@ export default function AssistenteScreen() {
         "Aumentar gradualmente o tempo de corrida e desenvolver resistência.";
     }
 
-    /*
-     * 4. TREINO PRINCIPAL
-     */
-    let workout: string[] = [];
+    /* =====================================================
+       MAIN WORKOUT
+    ===================================================== */
 
-    /*
-     * Iniciante / pouca distância
-     */
+    let workout: WorkoutStep[] = [];
+
     if (maxDistance <= 2 || runningTime <= 15 || level.includes("iniciante")) {
       workout = [
-        "3 min de corrida muito leve",
-        "2 min de caminhada",
-        "4 min de corrida leve",
-        "2 min de caminhada",
-        "4 min de corrida leve",
-        "2 min de caminhada",
-        "3 min de corrida muito leve",
+        defaultStep(
+          "Corrida muito leve",
+          "3 min",
+          "Corre num ritmo muito confortável, sem tentar ganhar velocidade.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Caminha tranquilamente para recuperar.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida leve",
+          "4 min",
+          "Mantém um ritmo em que ainda consegues falar.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera com caminhada confortável.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida leve",
+          "4 min",
+          "Mantém esforço confortável e controlado.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera antes do último bloco.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida muito leve",
+          "3 min",
+          "Termina sem aumentar a velocidade.",
+          AVATAR_EXERCISES.easyRun,
+        ),
       ];
     } else if (maxDistance <= 5 || runningTime <= 35) {
-      /*
-       * Alguma experiência
-       */
       workout = [
-        "5 min de corrida leve",
-        "2 min de caminhada",
-        "6 min de corrida confortável",
-        "2 min de caminhada",
-        "6 min de corrida confortável",
-        "2 min de caminhada",
-        "5 min de corrida leve",
+        defaultStep(
+          "Corrida leve",
+          "5 min",
+          "Começa progressivamente e encontra um ritmo confortável.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera sem parar completamente.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida confortável",
+          "6 min",
+          "Mantém um esforço sustentável.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recuperação tranquila.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida confortável",
+          "6 min",
+          "Mantém a respiração controlada.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera antes do último bloco.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida leve",
+          "5 min",
+          "Termina de forma confortável.",
+          AVATAR_EXERCISES.easyRun,
+        ),
       ];
     } else {
-      /*
-       * Maior experiência
-       */
       workout = [
-        "8 min de corrida confortável",
-        "2 min de recuperação",
-        "8 min de corrida confortável",
-        "2 min de recuperação",
-        "8 min de corrida confortável",
+        defaultStep(
+          "Corrida confortável",
+          "8 min",
+          "Corre num ritmo estável e confortável.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Recuperação",
+          "2 min",
+          "Caminha ou faz trote muito leve.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida confortável",
+          "8 min",
+          "Mantém o esforço controlado.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Recuperação",
+          "2 min",
+          "Recupera antes do último bloco.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida confortável",
+          "8 min",
+          "Termina sem sprintar.",
+          AVATAR_EXERCISES.easyRun,
+        ),
       ];
     }
 
-    /*
-     * Se estiver cansada,
-     * reduzir carga.
-     */
+    /* =====================================================
+       TIREDNESS
+    ===================================================== */
+
     if (feeling === "Cansada") {
       workout = [
-        "5 min de corrida muito leve",
-        "2 min de caminhada",
-        "5 min de corrida leve",
-        "2 min de caminhada",
-        "5 min de corrida muito leve",
+        defaultStep(
+          "Corrida muito leve",
+          "5 min",
+          "Mantém uma intensidade muito confortável.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera caminhando.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida leve",
+          "5 min",
+          "Não aumentes a velocidade.",
+          AVATAR_EXERCISES.easyRun,
+        ),
+
+        defaultStep(
+          "Caminhada",
+          "2 min",
+          "Recupera tranquilamente.",
+          AVATAR_EXERCISES.easyWalk,
+        ),
+
+        defaultStep(
+          "Corrida muito leve",
+          "5 min",
+          "Finaliza sem acumular fadiga.",
+          AVATAR_EXERCISES.easyRun,
+        ),
       ];
     }
 
-    /*
-     * 5. AQUECIMENTO
-     */
-    const warmup = [
-      "5 min de caminhada rápida",
-      "10 círculos de tornozelo para cada lado",
-      "10 movimentos de mobilidade da anca",
-      "10 balanços de perna para cada lado",
-      "2 min de caminhada progressivamente mais rápida",
+    /* =====================================================
+       WARMUP
+    ===================================================== */
+
+    const warmup: WorkoutStep[] = [
+      defaultStep(
+        "Caminhada rápida",
+        "5 min",
+        "Começa a elevar gradualmente a temperatura corporal.",
+        AVATAR_EXERCISES.easyWalk,
+      ),
+
+      defaultStep(
+        "Círculos de tornozelo",
+        "30 s",
+        "Faz movimentos circulares controlados com cada tornozelo.",
+        AVATAR_EXERCISES.ankleCircles,
+      ),
+
+      defaultStep(
+        "Mobilidade da anca",
+        "1 min",
+        "Movimenta a anca de forma lenta e controlada.",
+        AVATAR_EXERCISES.hipMobility,
+      ),
+
+      defaultStep(
+        "Balanços de perna",
+        "1 min",
+        "Faz movimentos controlados, sem forçar a amplitude.",
+        AVATAR_EXERCISES.legSwings,
+      ),
+
+      defaultStep(
+        "Caminhada progressiva",
+        "2 min",
+        "Aumenta gradualmente o ritmo da caminhada.",
+        AVATAR_EXERCISES.easyWalk,
+      ),
     ];
 
-    /*
-     * 6. VOLTA À CALMA
-     */
-    const cooldown = [
-      "5 min de caminhada tranquila",
-      "Respiração lenta até normalizar",
-      "Alongamento suave dos gémeos",
-      "Alongamento suave da parte da frente das coxas",
-      "Mobilidade suave da anca",
+    /* =====================================================
+       MOBILITY
+    ===================================================== */
+
+    const mobility: WorkoutStep[] = [
+      defaultStep(
+        "Agachamento até à extensão",
+        "8 repetições",
+        "Desce de forma confortável e regressa à posição inicial com controlo.",
+        AVATAR_EXERCISES.squatToStand,
+      ),
+
+      defaultStep(
+        "Elevação dos gémeos",
+        "10 repetições",
+        "Eleva os calcanhares lentamente e regressa ao chão com controlo.",
+        AVATAR_EXERCISES.calfRaise,
+      ),
+
+      defaultStep(
+        "Mobilidade da anca",
+        "30 s por lado",
+        "Faz movimentos suaves, sem forçar amplitude.",
+        AVATAR_EXERCISES.hipMobility,
+      ),
     ];
 
-    /*
-     * 7. NOTA
-     */
+    /* =====================================================
+       COOLDOWN
+    ===================================================== */
+
+    const cooldown: WorkoutStep[] = [
+      defaultStep(
+        "Caminhada tranquila",
+        "5 min",
+        "Reduz progressivamente o ritmo.",
+        AVATAR_EXERCISES.easyWalk,
+      ),
+
+      defaultStep(
+        "Respiração",
+        "1–2 min",
+        "Respira lentamente até a frequência cardíaca começar a normalizar.",
+        AVATAR_EXERCISES.breathing,
+      ),
+
+      defaultStep(
+        "Alongamento dos gémeos",
+        "30 s por lado",
+        "Alongamento suave, sem provocar dor.",
+        AVATAR_EXERCISES.calfStretch,
+      ),
+
+      defaultStep(
+        "Alongamento da parte da frente da coxa",
+        "30 s por lado",
+        "Mantém o alongamento suave.",
+        AVATAR_EXERCISES.quadStretch,
+      ),
+
+      defaultStep(
+        "Mobilidade suave da anca",
+        "30 s por lado",
+        "Movimentos lentos e confortáveis.",
+        AVATAR_EXERCISES.hipStretch,
+      ),
+    ];
+
+    /* =====================================================
+       NOTE
+    ===================================================== */
+
     let note =
       "Mantém um ritmo confortável. Deves conseguir falar durante a maior parte da corrida.";
 
     if (limitations.trim().length > 0) {
       note =
-        "O treino foi pensado tendo em conta a limitação que indicaste. Mantém a intensidade confortável e interrompe o exercício se aparecer dor.";
+        "O treino foi pensado tendo em conta a limitação indicada. Mantém a intensidade confortável e interrompe o exercício se aparecer dor.";
     }
 
     if (feeling === "Cansada") {
@@ -481,12 +994,13 @@ export default function AssistenteScreen() {
 
     if (interview.hasRace === "Sim") {
       note +=
-        " Como tens uma prova como objetivo, vamos aumentar a carga progressivamente ao longo das próximas sessões.";
+        " Como tens uma prova como objetivo, a carga deverá aumentar progressivamente ao longo das próximas sessões.";
     }
 
-    /*
-     * 8. TÍTULO
-     */
+    /* =====================================================
+       TITLE
+    ===================================================== */
+
     let title = "Corrida fácil + caminhada";
 
     if (level.includes("iniciante") || maxDistance <= 2) {
@@ -501,28 +1015,109 @@ export default function AssistenteScreen() {
       duration: workoutDuration,
       intensity,
       warmup,
+      mobility,
       workout,
       cooldown,
       note,
+      safetyNote: "Treino local de fallback. A IA não esteve disponível.",
+      source: "local",
     };
   }
 
-  /*
-   * CRIAR TREINO
-   */
+  /* =========================================================
+     AI WORKOUT
+  ========================================================= */
+
+  async function createWorkoutWithAI(): Promise<Workout> {
+    if (!API_BASE_URL) {
+      throw new Error("EXPO_PUBLIC_API_URL não está configurada.");
+    }
+
+    const endpoint = `${API_BASE_URL.replace(/\/$/, "")}/api/workout`;
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify({
+        profile,
+
+        interview,
+
+        /*
+         * Também enviamos explicitamente o relato.
+         * Isto facilita futuras integrações com voz.
+         */
+        userMessage: interview.todayReport,
+      }),
+    });
+
+    let data: any = null;
+
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error || `Erro da API (${response.status})`);
+    }
+
+    const rawWorkout = data?.workout ?? data;
+
+    return {
+      ...normalizeWorkout(rawWorkout),
+      source: "ai",
+    };
+  }
+
+  /* =========================================================
+     CREATE WORKOUT
+  ========================================================= */
+
   async function handleCreateWorkout() {
     try {
       setSaving(true);
+      setAiError(null);
 
-      const newWorkout = createFirstWorkout();
+      let newWorkout: Workout;
+
+      try {
+        /*
+         * PRIMEIRO:
+         * tenta criar através da IA.
+         */
+        newWorkout = await createWorkoutWithAI();
+      } catch (error) {
+        /*
+         * FALLBACK:
+         * se a API ainda não estiver configurada
+         * ou estiver indisponível, usa o motor local.
+         */
+
+        console.log("IA indisponível. Usando fallback local:", error);
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "Não foi possível contactar a IA.";
+
+        setAiError(errorMessage);
+
+        newWorkout = createFirstWorkout();
+      }
 
       /*
-       * O novo treino substitui
-       * automaticamente o anterior.
+       * Guardar treino.
        */
       await saveWorkout(newWorkout);
 
       setWorkout(newWorkout);
+
       setWorkoutCreated(true);
     } catch (error) {
       console.log("Erro ao criar treino:", error);
@@ -531,9 +1126,10 @@ export default function AssistenteScreen() {
     }
   }
 
-  /*
-   * LOADING
-   */
+  /* =========================================================
+     LOADING
+  ========================================================= */
+
   if (loading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -546,9 +1142,10 @@ export default function AssistenteScreen() {
     );
   }
 
-  /*
-   * SEM PERFIL
-   */
+  /* =========================================================
+     NO PROFILE
+  ========================================================= */
+
   if (!profile) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -570,9 +1167,10 @@ export default function AssistenteScreen() {
     );
   }
 
-  /*
-   * TREINO CRIADO
-   */
+  /* =========================================================
+     WORKOUT CREATED
+  ========================================================= */
+
   if (workoutCreated && workout) {
     return (
       <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
@@ -591,6 +1189,10 @@ export default function AssistenteScreen() {
             <Text style={styles.headerTitle}>O teu treino</Text>
           </View>
 
+          {/* =================================================
+              ASSISTANT
+          ================================================= */}
+
           <View style={styles.robotContainer}>
             <View style={styles.robotCircle}>
               <Text style={styles.robot}>🤖</Text>
@@ -598,15 +1200,42 @@ export default function AssistenteScreen() {
           </View>
 
           <View style={styles.messageCard}>
-            <Text style={styles.messageTitle}>Primeiro treino criado!</Text>
+            <Text style={styles.messageTitle}>
+              {workout.source === "ai"
+                ? "Treino personalizado criado!"
+                : "Treino criado!"}
+            </Text>
 
             <Text style={styles.messageText}>
-              Preparei este treino com base nas informações que me deste.
+              {workout.source === "ai"
+                ? "Analisei o teu perfil, as respostas da entrevista e o teu relato de hoje para preparar esta sessão."
+                : "Preparei uma sessão local de segurança porque a API da IA ainda não está disponível."}
             </Text>
           </View>
 
+          {/* =================================================
+              AI ERROR
+          ================================================= */}
+
+          {aiError && (
+            <View style={styles.warningCard}>
+              <Text style={styles.warningTitle}>IA não disponível</Text>
+
+              <Text style={styles.warningText}>{aiError}</Text>
+
+              <Text style={styles.warningText}>
+                O treino apresentado é o fallback local. Depois de configurarmos
+                o backend, este botão passará a gerar os treinos através da IA.
+              </Text>
+            </View>
+          )}
+
+          {/* =================================================
+              WORKOUT HEADER
+          ================================================= */}
+
           <View style={styles.workoutHeaderCard}>
-            <Text style={styles.nextLabel}>PRIMEIRO TREINO</Text>
+            <Text style={styles.nextLabel}>TREINO PERSONALIZADO</Text>
 
             <Text style={styles.workoutTitle}>{workout.title}</Text>
 
@@ -627,17 +1256,57 @@ export default function AssistenteScreen() {
             </View>
           </View>
 
+          {/* =================================================
+              WARMUP
+          ================================================= */}
+
           <WorkoutSection title="Aquecimento" items={workout.warmup} />
+
+          {/* =================================================
+              MOBILITY
+          ================================================= */}
+
+          {workout.mobility.length > 0 && (
+            <WorkoutSection title="Mobilidade" items={workout.mobility} />
+          )}
+
+          {/* =================================================
+              MAIN WORKOUT
+          ================================================= */}
 
           <WorkoutSection title="Treino principal" items={workout.workout} />
 
+          {/* =================================================
+              COOLDOWN
+          ================================================= */}
+
           <WorkoutSection title="Volta à calma" items={workout.cooldown} />
+
+          {/* =================================================
+              SAFETY
+          ================================================= */}
+
+          {workout.safetyNote && (
+            <View style={styles.safetyCard}>
+              <Text style={styles.safetyTitle}>SEGURANÇA</Text>
+
+              <Text style={styles.safetyText}>{workout.safetyNote}</Text>
+            </View>
+          )}
+
+          {/* =================================================
+              NOTE
+          ================================================= */}
 
           <View style={styles.noteCard}>
             <Text style={styles.noteTitle}>NOTA DO ASSISTENTE</Text>
 
             <Text style={styles.noteText}>{workout.note}</Text>
           </View>
+
+          {/* =================================================
+              PLAN
+          ================================================= */}
 
           <Pressable
             style={styles.primaryButton}
@@ -650,9 +1319,10 @@ export default function AssistenteScreen() {
     );
   }
 
-  /*
-   * ENTREVISTA CONCLUÍDA
-   */
+  /* =========================================================
+     INTERVIEW COMPLETED
+  ========================================================= */
+
   if (completed) {
     return (
       <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
@@ -684,9 +1354,14 @@ export default function AssistenteScreen() {
               Já tenho as informações necessárias para conhecer melhor o teu
               ponto de partida.
               {"\n\n"}
-              Agora podemos preparar o teu primeiro treino personalizado.
+              Agora podemos preparar o teu primeiro treino personalizado com a
+              IA.
             </Text>
           </View>
+
+          {/* =================================================
+              ANSWERS
+          ================================================= */}
 
           <View style={styles.profileCard}>
             <Text style={styles.sectionTitle}>O que me disseste</Text>
@@ -707,7 +1382,15 @@ export default function AssistenteScreen() {
             )}
 
             <InfoRow label="Como te sentes hoje" value={interview.feeling} />
+
+            {interview.todayReport.trim().length > 0 && (
+              <InfoRow label="Relato de hoje" value={interview.todayReport} />
+            )}
           </View>
+
+          {/* =================================================
+              CREATE
+          ================================================= */}
 
           <View style={styles.nextCard}>
             <Text style={styles.nextLabel}>PRÓXIMA ETAPA</Text>
@@ -715,8 +1398,9 @@ export default function AssistenteScreen() {
             <Text style={styles.nextTitle}>Criar o teu primeiro treino</Text>
 
             <Text style={styles.nextDescription}>
-              Agora vamos transformar estas informações num treino adaptado ao
-              teu nível, objetivo e disponibilidade.
+              A IA vai analisar o teu perfil, experiência, objetivo,
+              disponibilidade e o relato de hoje para montar uma sessão
+              personalizada.
             </Text>
 
             <Pressable
@@ -734,9 +1418,10 @@ export default function AssistenteScreen() {
     );
   }
 
-  /*
-   * TELA INICIAL
-   */
+  /* =========================================================
+     INITIAL SCREEN
+  ========================================================= */
+
   if (!started) {
     return (
       <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
@@ -766,8 +1451,14 @@ export default function AssistenteScreen() {
               {"\n\n"}
               Agora quero conhecer melhor a tua corrida para conseguir preparar
               treinos adequados ao teu ponto de partida.
+              {"\n\n"}
+              Também podes contar livremente como estás hoje.
             </Text>
           </View>
+
+          {/* =================================================
+              PROFILE
+          ================================================= */}
 
           <View style={styles.profileCard}>
             <Text style={styles.sectionTitle}>O que já sei sobre ti</Text>
@@ -778,11 +1469,17 @@ export default function AssistenteScreen() {
 
             <InfoRow
               label="Dias disponíveis"
-              value={profile.days.join(" · ")}
+              value={
+                Array.isArray(profile.days) ? profile.days.join(" · ") : ""
+              }
             />
 
             <InfoRow label="Tempo por sessão" value={profile.duration} />
           </View>
+
+          {/* =================================================
+              START
+          ================================================= */}
 
           <View style={styles.nextCard}>
             <Text style={styles.nextLabel}>VAMOS COMEÇAR</Text>
@@ -792,8 +1489,8 @@ export default function AssistenteScreen() {
             </Text>
 
             <Text style={styles.nextDescription}>
-              São apenas algumas perguntas para perceber o teu momento atual e
-              preparar o teu próximo plano.
+              São algumas perguntas para perceber o teu momento atual e preparar
+              o teu próximo treino.
             </Text>
 
             <Pressable style={styles.primaryButton} onPress={startInterview}>
@@ -805,9 +1502,10 @@ export default function AssistenteScreen() {
     );
   }
 
-  /*
-   * ENTREVISTA
-   */
+  /* =========================================================
+     INTERVIEW
+  ========================================================= */
+
   const question = questions[currentQuestion];
 
   const progress = ((currentQuestion + 1) / questions.length) * 100;
@@ -825,6 +1523,10 @@ export default function AssistenteScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* =================================================
+              HEADER
+          ================================================= */}
+
           <View style={styles.header}>
             <Pressable onPress={previousQuestion} style={styles.backButton}>
               <Text style={styles.backText}>←</Text>
@@ -832,6 +1534,10 @@ export default function AssistenteScreen() {
 
             <Text style={styles.headerTitle}>Vamos conversar</Text>
           </View>
+
+          {/* =================================================
+              PROGRESS
+          ================================================= */}
 
           <View style={styles.progressContainer}>
             <View style={styles.progressBackground}>
@@ -850,11 +1556,19 @@ export default function AssistenteScreen() {
             </Text>
           </View>
 
+          {/* =================================================
+              SMALL ROBOT
+          ================================================= */}
+
           <View style={styles.smallRobotContainer}>
             <View style={styles.smallRobotCircle}>
               <Text style={styles.smallRobot}>🤖</Text>
             </View>
           </View>
+
+          {/* =================================================
+              QUESTION
+          ================================================= */}
 
           <View style={styles.questionCard}>
             <Text style={styles.questionTitle}>{question.title}</Text>
@@ -862,6 +1576,10 @@ export default function AssistenteScreen() {
             <Text style={styles.questionDescription}>
               {question.description}
             </Text>
+
+            {/* =================================================
+                TEXT
+            ================================================= */}
 
             {question.type === "text" && (
               <TextInput
@@ -871,9 +1589,20 @@ export default function AssistenteScreen() {
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.lime}
                 style={styles.input}
-                multiline={question.key === "raceDate"}
+                multiline={
+                  question.key === "raceDate" || question.key === "todayReport"
+                }
+                textAlignVertical={
+                  question.key === "raceDate" || question.key === "todayReport"
+                    ? "top"
+                    : "center"
+                }
               />
             )}
+
+            {/* =================================================
+                CHOICE
+            ================================================= */}
 
             {question.type === "choice" &&
               question.options?.map((option) => {
@@ -897,6 +1626,10 @@ export default function AssistenteScreen() {
                 );
               })}
           </View>
+
+          {/* =================================================
+              NAVIGATION
+          ================================================= */}
 
           <View style={styles.navigation}>
             {currentQuestion > 0 && (
@@ -931,9 +1664,10 @@ export default function AssistenteScreen() {
   );
 }
 
-/*
- * INFO ROW
- */
+/* =========================================================
+   INFO ROW
+========================================================= */
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
@@ -944,26 +1678,60 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/*
- * WORKOUT SECTION
- */
-function WorkoutSection({ title, items }: { title: string; items: string[] }) {
+/* =========================================================
+   WORKOUT SECTION
+========================================================= */
+
+function WorkoutSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: WorkoutStep[];
+}) {
   return (
     <View style={styles.workoutSection}>
       <Text style={styles.sectionTitle}>{title}</Text>
 
       {items.map((item, index) => (
-        <View key={`${item}-${index}`} style={styles.workoutItem}>
+        <View key={`${item.name}-${index}`} style={styles.workoutItem}>
           <View style={styles.stepCircle}>
             <Text style={styles.stepNumber}>{index + 1}</Text>
           </View>
 
-          <Text style={styles.workoutItemText}>{item}</Text>
+          <View style={styles.workoutItemContent}>
+            <Text style={styles.workoutItemTitle}>{item.name}</Text>
+
+            {item.duration.trim().length > 0 && (
+              <Text style={styles.workoutItemDuration}>{item.duration}</Text>
+            )}
+
+            {item.instructions.trim().length > 0 && (
+              <Text style={styles.workoutItemText}>{item.instructions}</Text>
+            )}
+
+            {/*
+
+              FUTURO:
+
+              Aqui será colocado o botão:
+
+              "Ver demonstração"
+
+              que abrirá o avatar 3D correspondente
+              a item.avatarExercise.
+
+            */}
+          </View>
         </View>
       ))}
     </View>
   );
 }
+
+/* =========================================================
+   COLORS
+========================================================= */
 
 const colors = {
   background: "#0B0F0D",
@@ -973,7 +1741,14 @@ const colors = {
   muted: "#A4ADA6",
   border: "#2A332D",
   placeholder: "#68736C",
+  warningBackground: "#332B16",
+  warningBorder: "#5D5028",
+  safetyBackground: "#19221B",
 };
+
+/* =========================================================
+   STYLES
+========================================================= */
 
 const styles = StyleSheet.create({
   screen: {
@@ -987,6 +1762,10 @@ const styles = StyleSheet.create({
     gap: 20,
   },
 
+  /* =======================================================
+     LOADING
+  ======================================================= */
+
   loadingContainer: {
     flex: 1,
     alignItems: "center",
@@ -999,12 +1778,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
+  /* =======================================================
+     EMPTY
+  ======================================================= */
+
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     padding: 24,
     gap: 16,
   },
+
+  /* =======================================================
+     HEADER
+  ======================================================= */
 
   header: {
     flexDirection: "row",
@@ -1032,6 +1819,10 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "700",
   },
+
+  /* =======================================================
+     ROBOT
+  ======================================================= */
 
   robotContainer: {
     alignItems: "center",
@@ -1073,6 +1864,10 @@ const styles = StyleSheet.create({
     fontSize: 45,
   },
 
+  /* =======================================================
+     MESSAGE
+  ======================================================= */
+
   messageCard: {
     backgroundColor: colors.card,
     borderRadius: 24,
@@ -1093,6 +1888,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 25,
   },
+
+  /* =======================================================
+     PROFILE
+  ======================================================= */
 
   profileCard: {
     backgroundColor: colors.card,
@@ -1127,6 +1926,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
+  /* =======================================================
+     NEXT CARD
+  ======================================================= */
+
   nextCard: {
     backgroundColor: "#27351B",
     borderRadius: 24,
@@ -1153,6 +1956,10 @@ const styles = StyleSheet.create({
     lineHeight: 23,
   },
 
+  /* =======================================================
+     BUTTONS
+  ======================================================= */
+
   primaryButton: {
     flex: 1,
     backgroundColor: colors.lime,
@@ -1168,6 +1975,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+
+  secondaryButton: {
+    paddingHorizontal: 22,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  secondaryButtonText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  disabledButton: {
+    opacity: 0.4,
+  },
+
+  /* =======================================================
+     PROGRESS
+  ======================================================= */
 
   progressContainer: {
     gap: 8,
@@ -1191,6 +2021,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "right",
   },
+
+  /* =======================================================
+     QUESTION
+  ======================================================= */
 
   questionCard: {
     backgroundColor: colors.card,
@@ -1255,24 +2089,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
 
-  secondaryButton: {
-    paddingHorizontal: 22,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-
-  disabledButton: {
-    opacity: 0.4,
-  },
+  /* =======================================================
+     GENERIC
+  ======================================================= */
 
   title: {
     color: colors.text,
@@ -1285,6 +2104,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
   },
+
+  /* =======================================================
+     WORKOUT HEADER
+  ======================================================= */
 
   workoutHeaderCard: {
     backgroundColor: colors.card,
@@ -1334,6 +2157,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
+  /* =======================================================
+     WORKOUT SECTION
+  ======================================================= */
+
   workoutSection: {
     backgroundColor: colors.card,
     borderRadius: 24,
@@ -1344,11 +2171,34 @@ const styles = StyleSheet.create({
 
   workoutItem: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+
+  workoutItemContent: {
+    flex: 1,
+    gap: 4,
+  },
+
+  workoutItemTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  workoutItemDuration: {
+    color: colors.lime,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  workoutItemText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   stepCircle: {
@@ -1366,12 +2216,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  workoutItemText: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 21,
-  },
+  /* =======================================================
+     NOTE
+  ======================================================= */
 
   noteCard: {
     backgroundColor: "#27351B",
@@ -1391,5 +2238,56 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     lineHeight: 23,
+  },
+
+  /* =======================================================
+     SAFETY
+  ======================================================= */
+
+  safetyCard: {
+    backgroundColor: colors.safetyBackground,
+    borderRadius: 24,
+    padding: 20,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
+  safetyTitle: {
+    color: colors.lime,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 2,
+  },
+
+  safetyText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+
+  /* =======================================================
+     WARNING
+  ======================================================= */
+
+  warningCard: {
+    backgroundColor: colors.warningBackground,
+    borderRadius: 20,
+    padding: 18,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+  },
+
+  warningTitle: {
+    color: colors.lime,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  warningText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 21,
   },
 });
