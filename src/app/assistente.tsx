@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
+import ExerciseAvatar from "@/components/ExerciseAvatar";
 
 /* =========================================================
    STORAGE
@@ -1700,7 +1701,9 @@ function WorkoutSection({
           </View>
 
           <View style={styles.workoutItemContent}>
-            <Text style={styles.workoutItemTitle}>{item.name}</Text>
+            <View style={styles.exerciseRow}>
+              <View style={styles.exerciseText}>
+                <Text style={styles.workoutItemTitle}>{item.name}</Text>
 
             {item.duration.trim().length > 0 && (
               <Text style={styles.workoutItemDuration}>{item.duration}</Text>
@@ -1710,18 +1713,16 @@ function WorkoutSection({
               <Text style={styles.workoutItemText}>{item.instructions}</Text>
             )}
 
-            {/*
+                <Pressable
+                  style={styles.demoButton}
+                  onPress={() => router.push(`/mobilidade?exercise=${item.avatarExercise}`)}
+                >
+                  <Text style={styles.demoButtonText}>Ver demonstração →</Text>
+                </Pressable>
+              </View>
 
-              FUTURO:
-
-              Aqui será colocado o botão:
-
-              "Ver demonstração"
-
-              que abrirá o avatar 3D correspondente
-              a item.avatarExercise.
-
-            */}
+              <ExerciseAvatar exerciseId={item.avatarExercise} size="small" />
+            </View>
           </View>
         </View>
       ))}
@@ -2181,6 +2182,33 @@ const styles = StyleSheet.create({
   workoutItemContent: {
     flex: 1,
     gap: 4,
+  },
+
+  exerciseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+
+  exerciseText: {
+    flex: 1,
+    gap: 4,
+  },
+
+  demoButton: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  demoButtonText: {
+    color: colors.lime,
+    fontSize: 11,
+    fontWeight: "700",
   },
 
   workoutItemTitle: {

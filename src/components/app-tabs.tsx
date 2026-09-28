@@ -25,6 +25,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="mobilidade">
+        <NativeTabs.Trigger.Label>Mobilidade</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="figure.run" md="directions_run" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="assistente">
         <NativeTabs.Trigger.Label>Assistente</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="sparkles" md="auto_awesome" />
