@@ -14,8 +14,8 @@ import {
   View,
 } from "react-native";
 
-import { SafeAreaView } from "react-native-safe-area-context";
 import ExerciseAvatar from "@/components/ExerciseAvatar";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 /* =========================================================
    STORAGE
@@ -25,17 +25,6 @@ const PROFILE_KEY = "corrida-ai.perfil.v1";
 const INTERVIEW_KEY = "corrida-ai.entrevista.v1";
 const WORKOUT_KEY = "corrida-ai.treino.v1";
 
-/*
- * URL do teu backend.
-
- * Exemplo no .env:
- *
- * EXPO_PUBLIC_API_URL=http://192.168.1.100:3000
- *
- * IMPORTANTE:
- * Não colocar OPENAI_API_KEY aqui.
- * A chave da OpenAI fica apenas no backend.
- */
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim() || "";
 
 /* =========================================================
@@ -59,13 +48,6 @@ type Interview = {
   hasRace: string;
   raceDate: string;
   feeling: string;
-
-  /*
-   * Relato livre.
-   *
-   * Aqui o utilizador poderá escrever futuramente
-   * aquilo que falou com o assistente por voz.
-   */
   todayReport: string;
 };
 
@@ -73,19 +55,6 @@ type WorkoutStep = {
   name: string;
   duration: string;
   instructions: string;
-
-  /*
-   * Identificador que será utilizado futuramente
-   * para escolher a animação do avatar 3D.
-   *
-   * Exemplos:
-   * ankle_circles
-   * hip_mobility
-   * leg_swings
-   * squat_to_stand
-   * easy_walk
-   * easy_run
-   */
   avatarExercise: string;
 };
 
@@ -94,23 +63,12 @@ type Workout = {
   objective: string;
   duration: string;
   intensity: string;
-
   warmup: WorkoutStep[];
-
   mobility: WorkoutStep[];
-
   workout: WorkoutStep[];
-
   cooldown: WorkoutStep[];
-
   note: string;
-
   safetyNote?: string;
-
-  /*
-   * Identifica se o treino veio da IA ou do
-   * motor local de segurança/fallback.
-   */
   source?: "ai" | "local";
 };
 
@@ -197,7 +155,7 @@ const questions: Question[] = [
     key: "todayReport",
     title: "Há alguma coisa que eu deva saber antes de preparar o treino?",
     description:
-      "Conta livremente como estás hoje. Podes falar de energia, sono, pernas pesadas, dificuldade, desconforto ou qualquer outra coisa que consideres importante.",
+      "Conta livremente como estás hoje. Podes falar de energia, sono, pernas pesadas, dificuldade, desconforto ou qualquer outra coisa importante.",
     type: "text",
     placeholder:
       "Ex.: Dormi mal e estou com as pernas pesadas. Sinto-me sem muita energia hoje...",
@@ -205,16 +163,8 @@ const questions: Question[] = [
 ];
 
 /* =========================================================
-   AVATAR EXERCISE IDS
+   AVATAR EXERCISES
 ========================================================= */
-
-/*
- * Estes IDs serão utilizados posteriormente
- * pelo componente do avatar 3D.
- *
- * A IA deverá escolher apenas IDs existentes
- * no catálogo do backend.
- */
 
 const AVATAR_EXERCISES = {
   ankleCircles: "ankle_circles",
@@ -236,7 +186,7 @@ const AVATAR_EXERCISES = {
 } as const;
 
 /* =========================================================
-   DEFAULT EXERCISES
+   DEFAULT STEP
 ========================================================= */
 
 function defaultStep(
@@ -254,25 +204,8 @@ function defaultStep(
 }
 
 /* =========================================================
-   NORMALIZE OLD WORKOUT
+   NORMALIZE WORKOUT STEP
 ========================================================= */
-
-/*
- * O app já possui treinos antigos guardados no SecureStore.
- *
- * Os treinos antigos têm:
- *
- * warmup: string[]
- * workout: string[]
- * cooldown: string[]
- *
- * A nova versão usa:
- *
- * WorkoutStep[]
- *
- * Esta função permite que o aplicativo continue
- * funcionando mesmo que exista um treino antigo salvo.
- */
 
 function normalizeWorkoutStep(
   item: unknown,
@@ -316,6 +249,10 @@ function normalizeWorkoutStep(
     avatarExercise: fallbackAvatar,
   };
 }
+
+/* =========================================================
+   NORMALIZE WORKOUT
+========================================================= */
 
 function normalizeWorkout(value: unknown): Workout {
   const workout = value as Partial<Workout>;
@@ -364,11 +301,8 @@ function normalizeWorkout(value: unknown): Workout {
         : "Leve a moderada",
 
     warmup,
-
     mobility,
-
     workout: mainWorkout,
-
     cooldown,
 
     note:
@@ -393,19 +327,12 @@ export default function AssistenteScreen() {
   const [interview, setInterview] = useState<Interview>(EMPTY_INTERVIEW);
 
   const [loading, setLoading] = useState(true);
-
   const [started, setStarted] = useState(false);
-
   const [completed, setCompleted] = useState(false);
-
   const [workoutCreated, setWorkoutCreated] = useState(false);
-
   const [currentQuestion, setCurrentQuestion] = useState(0);
-
   const [saving, setSaving] = useState(false);
-
   const [workout, setWorkout] = useState<Workout | null>(null);
-
   const [aiError, setAiError] = useState<string | null>(null);
 
   /* =========================================================
@@ -500,7 +427,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     QUESTION VALIDATION
+     VALIDATION
   ========================================================= */
 
   function isCurrentQuestionAnswered() {
@@ -516,7 +443,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     NEXT QUESTION
+     NEXT
   ========================================================= */
 
   function nextQuestion() {
@@ -524,17 +451,11 @@ export default function AssistenteScreen() {
       return;
     }
 
-    /*
-     * Se não tem prova,
-     * pula a pergunta da data.
-     */
-
     if (
       questions[currentQuestion].key === "hasRace" &&
       interview.hasRace === "Não"
     ) {
       setCurrentQuestion(currentQuestion + 2);
-
       return;
     }
 
@@ -544,7 +465,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     PREVIOUS QUESTION
+     PREVIOUS
   ========================================================= */
 
   function previousQuestion() {
@@ -553,17 +474,11 @@ export default function AssistenteScreen() {
       return;
     }
 
-    /*
-     * Se respondeu "Não" à prova,
-     * volta diretamente para hasRace.
-     */
-
     if (
       questions[currentQuestion].key === "feeling" &&
       interview.hasRace === "Não"
     ) {
       setCurrentQuestion(currentQuestion - 2);
-
       return;
     }
 
@@ -571,7 +486,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     START INTERVIEW
+     START
   ========================================================= */
 
   function startInterview() {
@@ -588,7 +503,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     FINISH INTERVIEW
+     FINISH
   ========================================================= */
 
   async function finishInterview() {
@@ -606,7 +521,7 @@ export default function AssistenteScreen() {
   }
 
   /* =========================================================
-     LOCAL FALLBACK WORKOUT
+     LOCAL WORKOUT
   ========================================================= */
 
   function createFirstWorkout(): Workout {
@@ -632,10 +547,6 @@ export default function AssistenteScreen() {
 
     const feeling = interview.feeling;
 
-    /* =====================================================
-       INTENSITY
-    ===================================================== */
-
     let intensity = "Leve a moderada";
 
     if (feeling === "Cansada") {
@@ -646,19 +557,11 @@ export default function AssistenteScreen() {
       intensity = "Moderada";
     }
 
-    /* =====================================================
-       DURATION
-    ===================================================== */
-
     let workoutDuration = profile?.duration || "30 minutos";
 
     if (feeling === "Cansada") {
       workoutDuration = "25 minutos";
     }
-
-    /* =====================================================
-       OBJECTIVE
-    ===================================================== */
 
     let objective = "Construir resistência e criar consistência na corrida.";
 
@@ -676,10 +579,6 @@ export default function AssistenteScreen() {
       objective =
         "Aumentar gradualmente o tempo de corrida e desenvolver resistência.";
     }
-
-    /* =====================================================
-       MAIN WORKOUT
-    ===================================================== */
 
     let workout: WorkoutStep[] = [];
 
@@ -824,10 +723,6 @@ export default function AssistenteScreen() {
       ];
     }
 
-    /* =====================================================
-       TIREDNESS
-    ===================================================== */
-
     if (feeling === "Cansada") {
       workout = [
         defaultStep(
@@ -867,10 +762,6 @@ export default function AssistenteScreen() {
       ];
     }
 
-    /* =====================================================
-       WARMUP
-    ===================================================== */
-
     const warmup: WorkoutStep[] = [
       defaultStep(
         "Caminhada rápida",
@@ -908,10 +799,6 @@ export default function AssistenteScreen() {
       ),
     ];
 
-    /* =====================================================
-       MOBILITY
-    ===================================================== */
-
     const mobility: WorkoutStep[] = [
       defaultStep(
         "Agachamento até à extensão",
@@ -934,10 +821,6 @@ export default function AssistenteScreen() {
         AVATAR_EXERCISES.hipMobility,
       ),
     ];
-
-    /* =====================================================
-       COOLDOWN
-    ===================================================== */
 
     const cooldown: WorkoutStep[] = [
       defaultStep(
@@ -976,10 +859,6 @@ export default function AssistenteScreen() {
       ),
     ];
 
-    /* =====================================================
-       NOTE
-    ===================================================== */
-
     let note =
       "Mantém um ritmo confortável. Deves conseguir falar durante a maior parte da corrida.";
 
@@ -997,10 +876,6 @@ export default function AssistenteScreen() {
       note +=
         " Como tens uma prova como objetivo, a carga deverá aumentar progressivamente ao longo das próximas sessões.";
     }
-
-    /* =====================================================
-       TITLE
-    ===================================================== */
 
     let title = "Corrida fácil + caminhada";
 
@@ -1038,20 +913,13 @@ export default function AssistenteScreen() {
 
     const response = await fetch(endpoint, {
       method: "POST",
-
       headers: {
         "Content-Type": "application/json",
       },
 
       body: JSON.stringify({
         profile,
-
         interview,
-
-        /*
-         * Também enviamos explicitamente o relato.
-         * Isto facilita futuras integrações com voz.
-         */
         userMessage: interview.todayReport,
       }),
     });
@@ -1088,18 +956,8 @@ export default function AssistenteScreen() {
       let newWorkout: Workout;
 
       try {
-        /*
-         * PRIMEIRO:
-         * tenta criar através da IA.
-         */
         newWorkout = await createWorkoutWithAI();
       } catch (error) {
-        /*
-         * FALLBACK:
-         * se a API ainda não estiver configurada
-         * ou estiver indisponível, usa o motor local.
-         */
-
         console.log("IA indisponível. Usando fallback local:", error);
 
         const errorMessage =
@@ -1112,13 +970,9 @@ export default function AssistenteScreen() {
         newWorkout = createFirstWorkout();
       }
 
-      /*
-       * Guardar treino.
-       */
       await saveWorkout(newWorkout);
 
       setWorkout(newWorkout);
-
       setWorkoutCreated(true);
     } catch (error) {
       console.log("Erro ao criar treino:", error);
@@ -1190,10 +1044,6 @@ export default function AssistenteScreen() {
             <Text style={styles.headerTitle}>O teu treino</Text>
           </View>
 
-          {/* =================================================
-              ASSISTANT
-          ================================================= */}
-
           <View style={styles.robotContainer}>
             <View style={styles.robotCircle}>
               <Text style={styles.robot}>🤖</Text>
@@ -1214,10 +1064,6 @@ export default function AssistenteScreen() {
             </Text>
           </View>
 
-          {/* =================================================
-              AI ERROR
-          ================================================= */}
-
           {aiError && (
             <View style={styles.warningCard}>
               <Text style={styles.warningTitle}>IA não disponível</Text>
@@ -1230,10 +1076,6 @@ export default function AssistenteScreen() {
               </Text>
             </View>
           )}
-
-          {/* =================================================
-              WORKOUT HEADER
-          ================================================= */}
 
           <View style={styles.workoutHeaderCard}>
             <Text style={styles.nextLabel}>TREINO PERSONALIZADO</Text>
@@ -1257,35 +1099,15 @@ export default function AssistenteScreen() {
             </View>
           </View>
 
-          {/* =================================================
-              WARMUP
-          ================================================= */}
-
           <WorkoutSection title="Aquecimento" items={workout.warmup} />
-
-          {/* =================================================
-              MOBILITY
-          ================================================= */}
 
           {workout.mobility.length > 0 && (
             <WorkoutSection title="Mobilidade" items={workout.mobility} />
           )}
 
-          {/* =================================================
-              MAIN WORKOUT
-          ================================================= */}
-
           <WorkoutSection title="Treino principal" items={workout.workout} />
 
-          {/* =================================================
-              COOLDOWN
-          ================================================= */}
-
           <WorkoutSection title="Volta à calma" items={workout.cooldown} />
-
-          {/* =================================================
-              SAFETY
-          ================================================= */}
 
           {workout.safetyNote && (
             <View style={styles.safetyCard}>
@@ -1295,19 +1117,11 @@ export default function AssistenteScreen() {
             </View>
           )}
 
-          {/* =================================================
-              NOTE
-          ================================================= */}
-
           <View style={styles.noteCard}>
             <Text style={styles.noteTitle}>NOTA DO ASSISTENTE</Text>
 
             <Text style={styles.noteText}>{workout.note}</Text>
           </View>
-
-          {/* =================================================
-              PLAN
-          ================================================= */}
 
           <Pressable
             style={styles.primaryButton}
@@ -1360,10 +1174,6 @@ export default function AssistenteScreen() {
             </Text>
           </View>
 
-          {/* =================================================
-              ANSWERS
-          ================================================= */}
-
           <View style={styles.profileCard}>
             <Text style={styles.sectionTitle}>O que me disseste</Text>
 
@@ -1388,10 +1198,6 @@ export default function AssistenteScreen() {
               <InfoRow label="Relato de hoje" value={interview.todayReport} />
             )}
           </View>
-
-          {/* =================================================
-              CREATE
-          ================================================= */}
 
           <View style={styles.nextCard}>
             <Text style={styles.nextLabel}>PRÓXIMA ETAPA</Text>
@@ -1457,10 +1263,6 @@ export default function AssistenteScreen() {
             </Text>
           </View>
 
-          {/* =================================================
-              PROFILE
-          ================================================= */}
-
           <View style={styles.profileCard}>
             <Text style={styles.sectionTitle}>O que já sei sobre ti</Text>
 
@@ -1477,10 +1279,6 @@ export default function AssistenteScreen() {
 
             <InfoRow label="Tempo por sessão" value={profile.duration} />
           </View>
-
-          {/* =================================================
-              START
-          ================================================= */}
 
           <View style={styles.nextCard}>
             <Text style={styles.nextLabel}>VAMOS COMEÇAR</Text>
@@ -1524,10 +1322,6 @@ export default function AssistenteScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* =================================================
-              HEADER
-          ================================================= */}
-
           <View style={styles.header}>
             <Pressable onPress={previousQuestion} style={styles.backButton}>
               <Text style={styles.backText}>←</Text>
@@ -1535,10 +1329,6 @@ export default function AssistenteScreen() {
 
             <Text style={styles.headerTitle}>Vamos conversar</Text>
           </View>
-
-          {/* =================================================
-              PROGRESS
-          ================================================= */}
 
           <View style={styles.progressContainer}>
             <View style={styles.progressBackground}>
@@ -1557,19 +1347,11 @@ export default function AssistenteScreen() {
             </Text>
           </View>
 
-          {/* =================================================
-              SMALL ROBOT
-          ================================================= */}
-
           <View style={styles.smallRobotContainer}>
             <View style={styles.smallRobotCircle}>
               <Text style={styles.smallRobot}>🤖</Text>
             </View>
           </View>
-
-          {/* =================================================
-              QUESTION
-          ================================================= */}
 
           <View style={styles.questionCard}>
             <Text style={styles.questionTitle}>{question.title}</Text>
@@ -1577,10 +1359,6 @@ export default function AssistenteScreen() {
             <Text style={styles.questionDescription}>
               {question.description}
             </Text>
-
-            {/* =================================================
-                TEXT
-            ================================================= */}
 
             {question.type === "text" && (
               <TextInput
@@ -1600,10 +1378,6 @@ export default function AssistenteScreen() {
                 }
               />
             )}
-
-            {/* =================================================
-                CHOICE
-            ================================================= */}
 
             {question.type === "choice" &&
               question.options?.map((option) => {
@@ -1627,10 +1401,6 @@ export default function AssistenteScreen() {
                 );
               })}
           </View>
-
-          {/* =================================================
-              NAVIGATION
-          ================================================= */}
 
           <View style={styles.navigation}>
             {currentQuestion > 0 && (
@@ -1705,21 +1475,31 @@ function WorkoutSection({
               <View style={styles.exerciseText}>
                 <Text style={styles.workoutItemTitle}>{item.name}</Text>
 
-            {item.duration.trim().length > 0 && (
-              <Text style={styles.workoutItemDuration}>{item.duration}</Text>
-            )}
+                {item.duration.trim().length > 0 && (
+                  <Text style={styles.workoutItemDuration}>
+                    {item.duration}
+                  </Text>
+                )}
 
-            {item.instructions.trim().length > 0 && (
-              <Text style={styles.workoutItemText}>{item.instructions}</Text>
-            )}
+                {item.instructions.trim().length > 0 && (
+                  <Text style={styles.workoutItemText}>
+                    {item.instructions}
+                  </Text>
+                )}
 
                 <Pressable
                   style={styles.demoButton}
-                  onPress={() => router.push(`/mobilidade?exercise=${item.avatarExercise}`)}
+                  onPress={() =>
+                    router.push(`/mobilidade?exercise=${item.avatarExercise}`)
+                  }
                 >
                   <Text style={styles.demoButtonText}>Ver demonstração →</Text>
                 </Pressable>
               </View>
+
+              {/* =================================================
+                  AVATAR 3D
+              ================================================= */}
 
               <ExerciseAvatar exerciseId={item.avatarExercise} size="small" />
             </View>
@@ -1763,10 +1543,6 @@ const styles = StyleSheet.create({
     gap: 20,
   },
 
-  /* =======================================================
-     LOADING
-  ======================================================= */
-
   loadingContainer: {
     flex: 1,
     alignItems: "center",
@@ -1779,20 +1555,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
-  /* =======================================================
-     EMPTY
-  ======================================================= */
-
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     padding: 24,
     gap: 16,
   },
-
-  /* =======================================================
-     HEADER
-  ======================================================= */
 
   header: {
     flexDirection: "row",
@@ -1820,10 +1588,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "700",
   },
-
-  /* =======================================================
-     ROBOT
-  ======================================================= */
 
   robotContainer: {
     alignItems: "center",
@@ -1865,10 +1629,6 @@ const styles = StyleSheet.create({
     fontSize: 45,
   },
 
-  /* =======================================================
-     MESSAGE
-  ======================================================= */
-
   messageCard: {
     backgroundColor: colors.card,
     borderRadius: 24,
@@ -1889,10 +1649,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 25,
   },
-
-  /* =======================================================
-     PROFILE
-  ======================================================= */
 
   profileCard: {
     backgroundColor: colors.card,
@@ -1927,10 +1683,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  /* =======================================================
-     NEXT CARD
-  ======================================================= */
-
   nextCard: {
     backgroundColor: "#27351B",
     borderRadius: 24,
@@ -1956,10 +1708,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
   },
-
-  /* =======================================================
-     BUTTONS
-  ======================================================= */
 
   primaryButton: {
     flex: 1,
@@ -1996,10 +1744,6 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
 
-  /* =======================================================
-     PROGRESS
-  ======================================================= */
-
   progressContainer: {
     gap: 8,
   },
@@ -2022,10 +1766,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "right",
   },
-
-  /* =======================================================
-     QUESTION
-  ======================================================= */
 
   questionCard: {
     backgroundColor: colors.card,
@@ -2090,10 +1830,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
 
-  /* =======================================================
-     GENERIC
-  ======================================================= */
-
   title: {
     color: colors.text,
     fontSize: 28,
@@ -2105,10 +1841,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
   },
-
-  /* =======================================================
-     WORKOUT HEADER
-  ======================================================= */
 
   workoutHeaderCard: {
     backgroundColor: colors.card,
@@ -2157,10 +1889,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-
-  /* =======================================================
-     WORKOUT SECTION
-  ======================================================= */
 
   workoutSection: {
     backgroundColor: colors.card,
@@ -2244,10 +1972,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  /* =======================================================
-     NOTE
-  ======================================================= */
-
   noteCard: {
     backgroundColor: "#27351B",
     borderRadius: 24,
@@ -2267,10 +1991,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
   },
-
-  /* =======================================================
-     SAFETY
-  ======================================================= */
 
   safetyCard: {
     backgroundColor: colors.safetyBackground,
@@ -2293,10 +2013,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
   },
-
-  /* =======================================================
-     WARNING
-  ======================================================= */
 
   warningCard: {
     backgroundColor: colors.warningBackground,

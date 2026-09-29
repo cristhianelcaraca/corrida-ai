@@ -1,3 +1,4 @@
+import { GLView } from "expo-gl";
 import { StyleSheet, Text, View } from "react-native";
 
 type Props = {
@@ -6,17 +7,31 @@ type Props = {
 };
 
 export default function ExerciseAvatar({ exerciseId, size = "large" }: Props) {
-  /*
-   * O asset/modelo do avatar 3D ainda não está dentro do ZIP enviado.
-   * Este componente já é o ponto único de integração:
-   * quando o modelo 3D for colocado no projeto, substituímos apenas
-   * o conteúdo desta View pelo renderer do avatar.
-   */
+  const onContextCreate = (gl: any) => {
+    console.log("================================");
+    console.log("GLVIEW FUNCIONANDO!");
+    console.log("EXERCISE:", exerciseId);
+    console.log("WIDTH:", gl.drawingBufferWidth);
+    console.log("HEIGHT:", gl.drawingBufferHeight);
+    console.log("================================");
+
+    gl.clearColor(0.1, 0.15, 0.05, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.endFrameEXP();
+  };
+
   return (
-    <View style={[styles.avatar, size === "small" ? styles.small : styles.large]}>
-      <View style={styles.inner}>
-        <Text style={styles.label}>AVATAR</Text>
-        <Text style={styles.exerciseId}>{exerciseId.replaceAll("_", " ")}</Text>
+    <View
+      style={[styles.avatar, size === "small" ? styles.small : styles.large]}
+    >
+      <GLView
+        style={StyleSheet.absoluteFill}
+        onContextCreate={onContextCreate}
+      />
+
+      <View pointerEvents="none" style={styles.label}>
+        <Text style={styles.text}>{exerciseId}</Text>
       </View>
     </View>
   );
@@ -27,13 +42,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#27351B",
     borderWidth: 1,
     borderColor: "#526B2B",
-    alignItems: "center",
-    justifyContent: "center",
     overflow: "hidden",
   },
-  small: { width: 64, height: 64, borderRadius: 32 },
-  large: { width: 180, height: 180, borderRadius: 90 },
-  inner: { alignItems: "center", paddingHorizontal: 12 },
-  label: { color: "#D0FF57", fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
-  exerciseId: { color: "#F5F7F3", fontSize: 11, textAlign: "center", marginTop: 5 },
+
+  small: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+  },
+
+  large: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+  },
+
+  label: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 8,
+    alignItems: "center",
+  },
+
+  text: {
+    color: "#D0FF57",
+    fontSize: 9,
+  },
 });

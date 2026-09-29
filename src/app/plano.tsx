@@ -1,3 +1,5 @@
+import { useFocusEffect, useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -7,19 +9,24 @@ import {
   Text,
   View,
 } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 
 const WORKOUT_KEY = "corrida-ai.treino.v1";
+
+type WorkoutStep = {
+  name: string;
+  duration: string;
+  instructions: string;
+  avatarExercise: string;
+};
 
 type Workout = {
   title: string;
   objective: string;
   duration: string;
   intensity: string;
-  warmup: string[];
-  workout: string[];
-  cooldown: string[];
+  warmup: WorkoutStep[];
+  workout: WorkoutStep[];
+  cooldown: WorkoutStep[];
   note: string;
 };
 
@@ -32,18 +39,30 @@ const colors = {
   border: "#2A332D",
 };
 
-function WorkoutSection({ title, items }: { title: string; items: string[] }) {
+function WorkoutSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: WorkoutStep[];
+}) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
 
       {items.map((item, index) => (
-        <View key={`${item}-${index}`} style={styles.step}>
+        <View key={`${item.name}-${index}`} style={styles.step}>
           <View style={styles.numberCircle}>
             <Text style={styles.number}>{index + 1}</Text>
           </View>
 
-          <Text style={styles.stepText}>{item}</Text>
+          <View style={styles.stepContent}>
+            <Text style={styles.stepText}>{item.name}</Text>
+
+            <Text style={styles.duration}>{item.duration}</Text>
+
+            <Text style={styles.instructions}>{item.instructions}</Text>
+          </View>
         </View>
       ))}
     </View>
@@ -140,11 +159,13 @@ export default function PlanoScreen() {
         <View style={styles.infoRow}>
           <View style={styles.infoBox}>
             <Text style={styles.infoLabel}>DURAÇÃO</Text>
+
             <Text style={styles.infoValue}>{workout.duration}</Text>
           </View>
 
           <View style={styles.infoBox}>
             <Text style={styles.infoLabel}>INTENSIDADE</Text>
+
             <Text style={styles.infoValue}>{workout.intensity}</Text>
           </View>
         </View>
@@ -278,8 +299,8 @@ const styles = StyleSheet.create({
 
   step: {
     flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
+    alignItems: "flex-start",
+    marginBottom: 16,
   },
 
   numberCircle: {
@@ -290,6 +311,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+    marginTop: 2,
   },
 
   number: {
@@ -298,11 +320,29 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  stepText: {
+  stepContent: {
     flex: 1,
+  },
+
+  stepText: {
     color: colors.text,
     fontSize: 15,
+    fontWeight: "600",
     lineHeight: 21,
+    marginBottom: 3,
+  },
+
+  duration: {
+    color: colors.lime,
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+
+  instructions: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
 
   noteCard: {

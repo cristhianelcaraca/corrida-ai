@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { useCallback, useState } from "react";
 
 import {
   Alert,
@@ -49,10 +49,6 @@ export default function HomeScreen() {
       };
     }, []),
   );
-
-  function openAssistant() {
-    router.push("/assistente");
-  }
 
   function openWorkout() {
     router.push("/plano");
@@ -114,10 +110,13 @@ export default function HomeScreen() {
             ))}
           </View>
 
-          {/* BOTÃO ASSISTENTE */}
+          {/* BOTÃO → TESTE DA ROTA GL */}
           <Pressable
             accessibilityRole="button"
-            onPress={openAssistant}
+            onPress={() => {
+              console.log("BOTÃO CLICADO");
+              router.push("/gl-test");
+            }}
             style={({ pressed }) => [
               styles.primaryButton,
               pressed && styles.pressed,
